@@ -19,9 +19,9 @@ data:
 
 train:
   epochs: 1.0
-  sequence_length: 2048
-  micro_batch_size: 2
-  batch_tokens: 131072
+  sequence_length: 1024
+  micro_batch_size: 1
+  batch_tokens: 524288
   precision: "bfloat16"
   grad_clip: 1.0
   compile: true

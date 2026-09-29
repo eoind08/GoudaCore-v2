@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
 @dataclass
@@ -78,58 +79,40 @@ def apply_rope(x, cos, sin):
 class Attention(nn.Module):
     def __init__(self, config):
         super().__init__()
-
         self.n_head = config.n_head
         self.n_kv_head = config.n_kv_head
         self.head_dim = config.head_dim
-        self.n_rep = self.n_head // self.n_kv_head
 
-        self.q_proj = nn.Linear(
+        q_dim = self.n_head * self.head_dim
+        kv_dim = self.n_kv_head * self.head_dim
+        self.q_dim, self.kv_dim = q_dim, kv_dim
+
+        self.qkv_proj = nn.Linear(
             config.n_embd,
-            self.n_head * self.head_dim,
+            q_dim + 2 * kv_dim,
             bias=False,
         )
-        self.k_proj = nn.Linear(
-            config.n_embd,
-            self.n_kv_head * self.head_dim,
-            bias=False,
-        )
-        self.v_proj = nn.Linear(
-            config.n_embd,
-            self.n_kv_head * self.head_dim,
-            bias=False,
-        )
+
         self.o_proj = nn.Linear(
-            self.n_head * self.head_dim,
+            q_dim,
             config.n_embd,
             bias=False,
         )
 
-        self.q_norm = (
-            RMSNorm(self.head_dim, config.rms_eps)
-            if config.qk_norm
-            else nn.Identity()
-        )
-        self.k_norm = (
-            RMSNorm(self.head_dim, config.rms_eps)
-            if config.qk_norm
-            else nn.Identity()
-        )
+        self.q_norm = RMSNorm(self.head_dim, config.rms_eps) if config.qk_norm else nn.Identity()
+        self.k_norm = RMSNorm(self.head_dim, config.rms_eps) if config.qk_norm else nn.Identity()
 
     def forward(self, x, cos, sin):
         B, T, _ = x.shape
 
-        q = self.q_proj(x).view(
-            B, T, self.n_head, self.head_dim
-        ).transpose(1, 2)
+        q, k, v = self.qkv_proj(x).split(
+            (self.q_dim, self.kv_dim, self.kv_dim),
+            dim=-1,
+        )
 
-        k = self.k_proj(x).view(
-            B, T, self.n_kv_head, self.head_dim
-        ).transpose(1, 2)
-
-        v = self.v_proj(x).view(
-            B, T, self.n_kv_head, self.head_dim
-        ).transpose(1, 2)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.n_kv_head, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_kv_head, self.head_dim).transpose(1, 2)
 
         q = self.q_norm(q)
         k = self.k_norm(k)
@@ -137,20 +120,16 @@ class Attention(nn.Module):
         q = apply_rope(q, cos, sin)
         k = apply_rope(k, cos, sin)
 
-        if self.n_rep != 1:
-            k = k.repeat_interleave(self.n_rep, dim=1)
-            v = v.repeat_interleave(self.n_rep, dim=1)
-
         y = F.scaled_dot_product_attention(
             q,
             k,
             v,
             dropout_p=0.0,
             is_causal=True,
+            enable_gqa=self.n_head != self.n_kv_head,
         )
 
         y = y.transpose(1, 2).contiguous().view(B, T, -1)
-
         return self.o_proj(y)
 
 
@@ -158,16 +137,12 @@ class SwiGLU(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.gate_proj = nn.Linear(
+        self.gate_up_proj = nn.Linear(
             config.n_embd,
-            config.mlp_hidden,
+            2 * config.mlp_hidden,
             bias=False,
         )
-        self.up_proj = nn.Linear(
-            config.n_embd,
-            config.mlp_hidden,
-            bias=False,
-        )
+
         self.down_proj = nn.Linear(
             config.mlp_hidden,
             config.n_embd,
@@ -175,9 +150,8 @@ class SwiGLU(nn.Module):
         )
 
     def forward(self, x):
-        return self.down_proj(
-            F.silu(self.gate_proj(x)) * self.up_proj(x)
-        )
+        gate, up = self.gate_up_proj(x).chunk(2, dim=-1)
+        return self.down_proj(F.silu(gate) * up)
 
 
 class Block(nn.Module):

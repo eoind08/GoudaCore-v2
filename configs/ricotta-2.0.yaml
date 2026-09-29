@@ -18,10 +18,10 @@ data:
   tokenizer: "alphaedge-ai/Qwen3-1.7B-eng-32768"
 
 train:
-  epochs: 1.0
+  epochs: 0.80
   sequence_length: 2048
   micro_batch_size: 8
-  batch_tokens: 131072
+  batch_tokens: 524288
   precision: "bfloat16"
   grad_clip: 1.0
   compile: true
@@ -50,8 +50,8 @@ scheduler:
 intervals:
   validate_every: 250
   validation_steps: 20
-  save_every: 1000
-  generate_every: 500
+  save_every: 2500
+  generate_every: 250
 
 generation:
   prompts:

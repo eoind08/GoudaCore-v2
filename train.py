@@ -505,13 +505,7 @@ def main():
             f"but model vocab={model_cfg.vocab_size}"
         )
 
-    compile_requested = bool(train_cfg.get("compile", True))
-    compile_enabled = compile_requested and generate_every == 0
-
-    if compile_requested and generate_every > 0:
-        print(
-            f"torch.compile disabled because generate_every={generate_every}"
-        )
+    compile_enabled = bool(train_cfg.get("compile", True))
 
     train_model = torch.compile(model) if compile_enabled else model
 
