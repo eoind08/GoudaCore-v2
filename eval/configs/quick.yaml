@@ -1,0 +1,14 @@
+model: hf
+model_args:
+  pretrained: ./runs/ricotta-2.0/r1/ricotta_2_0/final
+  trust_remote_code: true
+  dtype: bfloat16
+
+tasks:
+  - hellaswag
+
+device: cuda:0
+batch_size: 8
+limit: 100
+
+output_path: ./eval/results/ricotta-2.0-r1-smoke
