@@ -390,7 +390,7 @@ def load_checkpoint(path, model, train_loader, muon, adamw, device):
 
     state = torch.load(
         path / "trainer_state.pt",
-        map_location=device,
+        map_location="cpu",
         weights_only=False,
     )
 
@@ -403,7 +403,7 @@ def load_checkpoint(path, model, train_loader, muon, adamw, device):
     torch.set_rng_state(state["torch_rng"].cpu())
 
     if torch.cuda.is_available() and state["cuda_rng"] is not None:
-        torch.cuda.set_rng_state_all(state["cuda_rng"])
+        torch.cuda.set_rng_state_all([s.cpu() for s in state["cuda_rng"]])
 
     return int(state["completed_steps"]), int(state["cumulative_tokens"])
 
