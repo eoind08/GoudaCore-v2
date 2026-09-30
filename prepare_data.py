@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 from datasets import load_dataset
+import pyarrow
 from tokenizers import Tokenizer
 from tqdm import tqdm
 
@@ -43,6 +44,13 @@ def write_datafile(filename, tokens_np):
 
 def main():
     os.makedirs(LOCAL_DIR, exist_ok=True)
+
+    fragment_scan_options = pyarrow.dataset.ParquetFragmentScanOptions(
+        cache_options = pyarrow.CacheOptions(
+            prefetch_limit = 4
+            range_size_limit = 128 << 20,
+        ),
+    )
 
     fw = load_dataset(
         "HuggingFaceFW/fineweb-edu",

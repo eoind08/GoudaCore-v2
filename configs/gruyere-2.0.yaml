@@ -18,9 +18,9 @@ data:
   tokenizer: "alphaedge-ai/Qwen3-1.7B-eng-32768"
 
 train:
-  epochs: 0.34
+  epochs: 0.375
   sequence_length: 2048
-  micro_batch_size: 4
+  micro_batch_size: 8
   batch_tokens: 524288
   precision: "bfloat16"
   grad_clip: 1.0
@@ -44,8 +44,8 @@ optimizer:
 
 scheduler:
   warmup_fraction: 0.01
-  decay_fraction: 0.10
-  min_lr_ratio: 0.15
+  decay_fraction: 0.15
+  min_lr_ratio: 0.05
 
 intervals:
   validate_every: 250
