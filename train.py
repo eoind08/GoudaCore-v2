@@ -259,8 +259,8 @@ def generate_sample(model, tokenizer, prompt, cfg, device):
     out = model.generate(
         x,
         max_new_tokens=int(cfg.get("max_new_tokens", 128)),
-        temperature=float(cfg.get("temperature", 0.8)),
-        top_k=cfg.get("top_k", 50),
+        temperature=float(cfg.get("temperature", 0.01)),
+        top_k=cfg.get("top_k", 40),
     )
 
     text = tokenizer.decode(out[0].tolist(), skip_special_tokens=False)
@@ -345,9 +345,9 @@ def save_checkpoint(
         json.dump(
             {
                 "max_new_tokens": generation_cfg.get("max_new_tokens", 128),
-                "temperature": generation_cfg.get("temperature", 0.8),
-                "top_k": generation_cfg.get("top_k", 50),
-                "do_sample": generation_cfg.get("temperature", 0.8) != 0,
+                "temperature": generation_cfg.get("temperature", 0.01),
+                "top_k": generation_cfg.get("top_k", 40),
+                "do_sample": generation_cfg.get("temperature", 0.01) != 0,
                 "eos_token_id": tokenizer.token_to_id("<|endoftext|>"),
             },
             f,
