@@ -22,4 +22,4 @@ tasks:
 device: cuda:0
 batch_size: 8
 
-output_path: ./eval/results/gruyere-2.0-r1
+output_path: ./eval/results/gruyere-2.0-e2

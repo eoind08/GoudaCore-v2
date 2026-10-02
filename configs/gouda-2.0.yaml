@@ -20,7 +20,7 @@ data:
 train:
   epochs: 1.0
   sequence_length: 2048
-  micro_batch_size: 8
+  micro_batch_size: 2
   batch_tokens: 524288
   precision: "bfloat16"
   grad_clip: 1.0
@@ -44,8 +44,8 @@ optimizer:
 
 scheduler:
   warmup_fraction: 0.01
-  decay_fraction: 0.10
-  min_lr_ratio: 0.10
+  decay_fraction: 0.25
+  min_lr_ratio: 0.05
 
 intervals:
   validate_every: 250
@@ -55,14 +55,11 @@ intervals:
 
 generation:
   prompts:
-    - "The capital of France is"
     - "The largest planet in the Solar System is"
-    - "In mathematics, the derivative of x squared is"
-    - "Photosynthesis is the process by which"
-    - "The primary purpose of a central bank is"
-    - "The history of mathematics begins"
-    - "Artificial intelligence is"
-    - "Once upon a time, in a small village"
+    - "Photosynthesis is the process by which plants"
+    - "A book costs £12. If Alice buys three books and pays with £50, the amount of change she receives is"
+    - "Alice left an ice cube on a plate in a warm room. After two hours, the ice cube"
+    - "Solar panels convert sunlight into electricity. They require no fuel during operation, but their output depends on available sunlight. In summary,"
   max_new_tokens: 64
   temperature: 0.0
   top_k: null

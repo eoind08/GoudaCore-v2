@@ -1,6 +1,6 @@
 model: hf
 model_args:
-  pretrained: ./runs/ricotta-2.0/r1/ricotta_2_0/final
+  pretrained: ./runs/ricotta-2.0/r1-wsd10(minlr0.1)/ricotta_2_0/final
   trust_remote_code: true
   dtype: bfloat16
 
