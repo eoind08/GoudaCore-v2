@@ -18,7 +18,7 @@ data:
   tokenizer: "alphaedge-ai/Qwen3-1.7B-eng-32768"
 
 train:
-  epochs: 1.0
+  epochs: 0.548
   sequence_length: 2048
   micro_batch_size: 2
   batch_tokens: 524288
