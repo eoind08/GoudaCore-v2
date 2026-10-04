@@ -47,6 +47,7 @@ class ShardLoader:
     def reset(self):
         self.rng = random.Random(self.seed)
         self.order = list(range(len(self.shards)))
+
         if self.shuffle:
             self.rng.shuffle(self.order)
         self.order_pos = 0
@@ -76,19 +77,12 @@ class ShardLoader:
         while len(self.tokens) - self.position < n + 1:
             self._advance_shard()
 
-        buf = np.asarray(
-            self.tokens[self.position:self.position + n + 1],
-            dtype=np.int64,
-        )
+        buf = np.asarray(self.tokens[self.position:self.position + n + 1], dtype=np.int64,)
         self.position += n
-
         x = torch.from_numpy(buf[:-1].copy()).view(self.B, self.T)
         y = torch.from_numpy(buf[1:].copy()).view(self.B, self.T)
 
-        return (
-            x.to(self.device, non_blocking=True),
-            y.to(self.device, non_blocking=True),
-        )
+        return (x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True),)
 
     @property
     def current_shard(self):
@@ -101,13 +95,7 @@ class ShardLoader:
         return min(self.position / len(self.tokens), 1.0)
 
     def state_dict(self):
-        return {
-            "order": self.order,
-            "order_pos": self.order_pos,
-            "position": self.position,
-            "pass_index": self.pass_index,
-            "rng_state": self.rng.getstate(),
-        }
+        return {"order": self.order, "order_pos": self.order_pos, "position": self.position, "pass_index": self.pass_index, "rng_state": self.rng.getstate(),}
 
     def load_state_dict(self, state):
         self.order = state["order"]
@@ -160,16 +148,12 @@ def build_optimizers(model, cfg):
 
     Muon = getattr(torch.optim, "Muon", None)
     if Muon is None:
-        raise RuntimeError(
-            "torch.optim.Muon is unavailable. Install a PyTorch version with built-in Muon support."
-        )
+        raise RuntimeError("torch.optim.Muon is unavailable. Install a PyTorch version with built-in Muon support.")
 
     muon_cfg = cfg["optimizer"]["muon"]
     adam_cfg = cfg["optimizer"]["adamw"]
 
-    muon = Muon(
-        muon_params,
-        lr=float(muon_cfg["lr"]),
+    muon = Muon(muon_params, lr=float(muon_cfg["lr"]),
         momentum=float(muon_cfg.get("momentum", 0.95)),
         weight_decay=float(muon_cfg.get("weight_decay", 0.1)),
         nesterov=bool(muon_cfg.get("nesterov", True)),
@@ -178,16 +162,15 @@ def build_optimizers(model, cfg):
     )
 
     adamw = torch.optim.AdamW(
-        [
-            {
+        [{
                 "params": adamw_decay,
                 "weight_decay": float(adam_cfg.get("weight_decay", 0.1)),
             },
             {
                 "params": adamw_no_decay,
                 "weight_decay": 0.0,
-            },
-        ],
+            },],
+            
         lr=float(adam_cfg["lr"]),
         betas=tuple(adam_cfg.get("betas", [0.9, 0.95])),
         eps=float(adam_cfg.get("eps", 1e-8)),
@@ -220,22 +203,18 @@ def wsd_multiplier(step, total_steps, warmup_fraction, decay_fraction, min_lr_ra
 
     return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
-
 def set_lr(optimizer, lr):
     for group in optimizer.param_groups:
         group["lr"] = lr
-
 
 @torch.no_grad()
 def validate(model, loader, steps, device, precision):
     model.eval()
     loader.reset()
-
     loss = torch.zeros((), device=device)
 
     for _ in range(steps):
         x, y = loader.next_batch()
-
         with autocast_context(device, precision):
             _, batch_loss = model(x, y)
 
@@ -248,7 +227,6 @@ def validate(model, loader, steps, device, precision):
 @torch.no_grad()
 def generate_sample(model, tokenizer, prompt, cfg, device):
     model.eval()
-
     ids = tokenizer.encode(prompt, add_special_tokens=False).ids
 
     if not ids:
@@ -256,13 +234,7 @@ def generate_sample(model, tokenizer, prompt, cfg, device):
 
     x = torch.tensor(ids, dtype=torch.long, device=device)[None, :]
 
-    out = model.generate(
-        x,
-        max_new_tokens=int(cfg.get("max_new_tokens", 128)),
-        temperature=float(cfg.get("temperature", 0.01)),
-        top_k=cfg.get("top_k", 40),
-    )
-
+    out = model.generate(x, max_new_tokens=int(cfg.get("max_new_tokens", 128)), temperature=float(cfg.get("temperature", 0.01)), top_k=cfg.get("top_k", 40),)
     text = tokenizer.decode(out[0].tolist(), skip_special_tokens=False)
     model.train()
 
@@ -273,68 +245,37 @@ def save_tokenizer(tokenizer, output, max_seq_len):
     try:
         from transformers import PreTrainedTokenizerFast
 
-        hf_tokenizer = PreTrainedTokenizerFast(
-            tokenizer_object=tokenizer,
-            eos_token="<|endoftext|>",
-            model_max_length=max_seq_len,
-        )
+        hf_tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, eos_token="<|endoftext|>", model_max_length=max_seq_len,)
         hf_tokenizer.save_pretrained(output)
 
     except ImportError:
         tokenizer.save(str(output / "tokenizer.json"))
 
 
-def save_checkpoint(
-    save_dir,
-    model,
-    model_cfg,
-    cfg,
-    config_path,
-    tokenizer,
-    train_loader,
-    muon,
-    adamw,
-    completed_steps,
-    cumulative_tokens,
-):
+def save_checkpoint(save_dir, model, model_cfg, cfg, config_path, tokenizer, train_loader, muon, adamw, completed_steps, cumulative_tokens,):
     save_dir = Path(save_dir)
     tmp_dir = save_dir.parent / f".{save_dir.name}.tmp"
-
     shutil.rmtree(tmp_dir, ignore_errors=True)
     tmp_dir.mkdir(parents=True, exist_ok=True)
-
     family = slugify(cfg["name"].split("-")[0])
     model_file = Path(__file__).with_name("model.py")
 
-    save_model(
-        model,
-        str(tmp_dir / "model.safetensors"),
+    save_model(model, str(tmp_dir / "model.safetensors"),
         metadata={
             "format": "pt",
             "model": cfg["name"],
-        },
-    )
+        },)
 
-    shutil.copy2(
-        model_file,
-        tmp_dir / f"modeling_{family}.py",
-    )
-
-    shutil.copy2(
-        config_path,
-        tmp_dir / "training_config.yaml",
-    )
-
+    shutil.copy2(model_file, tmp_dir / f"modeling_{family}.py",)
+    shutil.copy2(config_path, tmp_dir / "training_config.yaml",)
     export_config = asdict(model_cfg)
-    export_config.update(
-        {
+    export_config.update({
             "model_type": family,
             "architectures": ["Gouda"],
             "name": cfg["name"],
             "torch_dtype": cfg["train"]["precision"],
             "tie_word_embeddings": True,
-        }
-    )
+        })
 
     with open(tmp_dir / "config.json", "w") as f:
         json.dump(export_config, f, indent=2)
@@ -342,17 +283,13 @@ def save_checkpoint(
     generation_cfg = cfg.get("generation", {})
 
     with open(tmp_dir / "generation_config.json", "w") as f:
-        json.dump(
-            {
+        json.dump({
                 "max_new_tokens": generation_cfg.get("max_new_tokens", 128),
                 "temperature": generation_cfg.get("temperature", 0.01),
                 "top_k": generation_cfg.get("top_k", 40),
                 "do_sample": generation_cfg.get("temperature", 0.01) != 0,
                 "eos_token_id": tokenizer.token_to_id("<|endoftext|>"),
-            },
-            f,
-            indent=2,
-        )
+            }, f, indent=2,)
 
     save_tokenizer(tokenizer, tmp_dir, model_cfg.max_seq_len)
 
@@ -375,24 +312,13 @@ def save_checkpoint(
 
     latest = save_dir.parent.parent / "latest_checkpoint.txt"
     latest.write_text(str(save_dir.resolve()))
-
     print(f"saved: {save_dir}")
-
 
 def load_checkpoint(path, model, train_loader, muon, adamw, device):
     path = Path(path)
 
-    load_model(
-        model,
-        str(path / "model.safetensors"),
-        device=str(device),
-    )
-
-    state = torch.load(
-        path / "trainer_state.pt",
-        map_location="cpu",
-        weights_only=False,
-    )
+    load_model(model, str(path / "model.safetensors"), device=str(device),)
+    state = torch.load(path / "trainer_state.pt", map_location="cpu", weights_only=False,)
 
     muon.load_state_dict(state["muon"])
     adamw.load_state_dict(state["adamw"])
@@ -406,7 +332,6 @@ def load_checkpoint(path, model, train_loader, muon, adamw, device):
         torch.cuda.set_rng_state_all([s.cpu() for s in state["cuda_rng"]])
 
     return int(state["completed_steps"]), int(state["cumulative_tokens"])
-
 
 def main():
     args = parse_args()
@@ -440,9 +365,7 @@ def main():
         raise ValueError("epochs must be > 0")
 
     if T > model_cfg.max_seq_len:
-        raise ValueError(
-            f"sequence_length={T} exceeds max_seq_len={model_cfg.max_seq_len}"
-        )
+        raise ValueError(f"sequence_length={T} exceeds max_seq_len={model_cfg.max_seq_len}")
 
     micro_tokens = B * T
 
@@ -468,32 +391,12 @@ def main():
     torch.set_float32_matmul_precision("high")
 
     data_dir = Path(data_cfg["directory"])
-
-    train_loader = ShardLoader(
-        data_dir,
-        "train",
-        B,
-        T,
-        device,
-        seed=seed,
-        shuffle=True,
-    )
-
-    val_loader = ShardLoader(
-        data_dir,
-        "val",
-        B,
-        T,
-        device,
-        seed=seed,
-        shuffle=False,
-    )
+    train_loader = ShardLoader(data_dir, "train", B, T, device, seed=seed, shuffle=True,)
+    val_loader = ShardLoader(data_dir, "val", B, T, device, seed=seed, shuffle=False,)
 
     target_tokens = int(train_loader.total_tokens * epochs)
     max_steps = math.ceil(target_tokens / batch_tokens)
-
     model = Gouda(model_cfg).to(device)
-
     muon, adamw = build_optimizers(model, cfg)
 
     tokenizer_name = data_cfg["tokenizer"]
@@ -506,7 +409,6 @@ def main():
         )
 
     compile_enabled = bool(train_cfg.get("compile", True))
-
     train_model = torch.compile(model) if compile_enabled else model
 
     output_dir = Path(cfg["save"]["output_dir"]) / slugify(name)
@@ -520,14 +422,7 @@ def main():
     cumulative_tokens = 0
 
     if args.resume:
-        start_step, cumulative_tokens = load_checkpoint(
-            args.resume,
-            model,
-            train_loader,
-            muon,
-            adamw,
-            device,
-        )
+        start_step, cumulative_tokens = load_checkpoint(args.resume, model, train_loader, muon, adamw, device,)
         print(
             f"resumed from {args.resume} at step {start_step:,}, "
             f"{cumulative_tokens / 1e9:.3f}B tokens"
@@ -579,20 +474,11 @@ def main():
 
             t0 = time.perf_counter()
 
-            lr_mult = wsd_multiplier(
-                step,
-                max_steps,
-                warmup_fraction,
-                decay_fraction,
-                min_lr_ratio,
-            )
-
+            lr_mult = wsd_multiplier(step, max_steps, warmup_fraction, decay_fraction, min_lr_ratio,)
             muon_lr = muon_base_lr * lr_mult
             adamw_lr = adamw_base_lr * lr_mult
-
             set_lr(muon, muon_lr)
             set_lr(adamw, adamw_lr)
-
             muon.zero_grad(set_to_none=True)
             adamw.zero_grad(set_to_none=True)
 
@@ -606,18 +492,12 @@ def main():
                     scaled_loss = loss / grad_accum_steps
 
                 if not torch.isfinite(loss):
-                    raise FloatingPointError(
-                        f"non-finite loss at step {step + 1}: {loss.item()}"
-                    )
+                    raise FloatingPointError(f"non-finite loss at step {step + 1}: {loss.item()}")
 
                 loss_accum += loss.detach() / grad_accum_steps
                 scaled_loss.backward()
 
-            norm = torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                grad_clip,
-            )
-
+            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip,)
             muon.step()
             adamw.step()
 
@@ -627,7 +507,6 @@ def main():
             dt = time.perf_counter() - t0
             cumulative_tokens += batch_tokens
             completed_steps = step + 1
-
             epoch = cumulative_tokens / train_loader.total_tokens
             shard_progress = train_loader.shard_progress
             tokens_per_sec = batch_tokens / dt
@@ -637,113 +516,34 @@ def main():
             else:
                 vram = 0.0
 
-            log_line = (
-                f"step {step + 1:6d}/{max_steps:<6d} | "
-                f"epoch {epoch:7.4f}/{epochs:.4f} | "
-                f"shard {train_loader.current_shard:4d} | "
-                f"shard_progress {shard_progress * 100:6.2f}% | "
-                f"tokens {cumulative_tokens / 1e9:8.4f}B | "
-                f"loss {loss_accum.item():.6f} | "
-                f"lr {adamw_lr:.4e} | "
-                f"muon_lr {muon_lr:.4e} | "
-                f"norm {norm.item():.4f} | "
-                f"tok/sec {tokens_per_sec:8.0f} | "
-                f"dt {dt * 1000:7.1f}ms | "
-                f"vram {vram:.2f}GB"
-            )
-
+            log_line = (f"step {step + 1:6d}/{max_steps:<6d} | " f"epoch {epoch:7.4f}/{epochs:.4f} | " f"shard {train_loader.current_shard:4d} | " f"shard_progress {shard_progress * 100:6.2f}% | " f"tokens {cumulative_tokens / 1e9:8.4f}B | " f"loss {loss_accum.item():.6f} | " f"lr {adamw_lr:.4e} | " f"muon_lr {muon_lr:.4e} | " f"norm {norm.item():.4f} | " f"tok/sec {tokens_per_sec:8.0f} | " f"dt {dt * 1000:7.1f}ms | " f"vram {vram:.2f}GB")
             print(log_line)
-
             with open(log_file, "a") as f:
-                f.write(
-                    f"{step + 1} train "
-                    f"epoch={epoch:.8f} "
-                    f"loss={loss_accum.item():.8f} "
-                    f"shard={train_loader.current_shard} "
-                    f"shard_progress={shard_progress:.8f} "
-                    f"tokens={cumulative_tokens} "
-                    f"lr={adamw_lr:.10e} "
-                    f"muon_lr={muon_lr:.10e} "
-                    f"norm={norm.item():.8f} "
-                    f"tok_sec={tokens_per_sec:.2f} "
-                    f"dt={dt:.6f} "
-                    f"vram_gb={vram:.4f}\n"
-                )
+                f.write(f"{step + 1} train " f"epoch={epoch:.8f} " f"loss={loss_accum.item():.8f} " f"shard={train_loader.current_shard} " f"shard_progress={shard_progress:.8f} " f"tokens={cumulative_tokens} " f"lr={adamw_lr:.10e} " f"muon_lr={muon_lr:.10e} " f"norm={norm.item():.8f} " f"tok_sec={tokens_per_sec:.2f} " f"dt={dt:.6f} " f"vram_gb={vram:.4f}\n")
 
             if validate_every > 0 and completed_steps % validate_every == 0:
-                val_loss = validate(
-                    train_model,
-                    val_loader,
-                    validation_steps,
-                    device,
-                    precision,
-                )
+                val_loss = validate(train_model, val_loader, validation_steps, device, precision,)
 
-                print(
-                    f"step {completed_steps:6d} | "
-                    f"epoch {epoch:7.4f} | "
-                    f"validation loss {val_loss:.6f} | "
-                    f"ppl {math.exp(min(val_loss, 20)):.4f}"
-                )
-
+                print(f"step {completed_steps:6d} | " f"epoch {epoch:7.4f} | " f"validation loss {val_loss:.6f} | " f"ppl {math.exp(min(val_loss, 20)):.4f}")
                 with open(log_file, "a") as f:
-                    f.write(
-                        f"{completed_steps} val "
-                        f"epoch={epoch:.8f} "
-                        f"loss={val_loss:.8f} "
-                        f"ppl={math.exp(min(val_loss, 20)):.8f} "
-                        f"tokens={cumulative_tokens}\n"
-                    )
+                    f.write( f"{completed_steps} val " f"epoch={epoch:.8f} " f"loss={val_loss:.8f} " f"ppl={math.exp(min(val_loss, 20)):.8f} " f"tokens={cumulative_tokens}\n")
 
             if generate_every > 0 and completed_steps % generate_every == 0:
                 print("\n--- generations ---")
 
                 for i, prompt in enumerate(cfg["generation"]["prompts"]):
-                    generation = generate_sample(
-                        model,
-                        tokenizer,
-                        prompt,
-                        cfg["generation"],
-                        device,
-                    )
-
+                    generation = generate_sample(model, tokenizer, prompt, cfg["generation"], device,)
                     print(f"[{i + 1}] {generation}")
 
                     with open(log_file, "a", encoding="utf-8") as f:
-                        f.write(
-                            f"{completed_steps} generate "
-                            f"epoch={epoch:.8f} "
-                            f"prompt={json.dumps(prompt)} "
-                            f"text={json.dumps(generation)}\n"
-                        )
-
+                        f.write(f"{completed_steps} generate " f"epoch={epoch:.8f} " f"prompt={json.dumps(prompt)} " f"text={json.dumps(generation)}\n")
                 print("-------------------\n")
 
             if save_every > 0 and completed_steps % save_every == 0:
-                save_checkpoint(
-                    checkpoint_dir / f"step_{completed_steps:06d}",
-                    model,
-                    model_cfg,
-                    cfg,
-                    config_path,
-                    tokenizer,
-                    train_loader,
-                    muon,
-                    adamw,
-                    completed_steps,
-                    cumulative_tokens,
-                )
+                save_checkpoint(checkpoint_dir / f"step_{completed_steps:06d}", model, model_cfg, cfg, config_path, tokenizer, train_loader, muon, adamw, completed_steps, cumulative_tokens,)
 
-        final_val_loss = validate(
-            train_model,
-            val_loader,
-            validation_steps,
-            device,
-            precision,
-        )
-
+        final_val_loss = validate(train_model, val_loader, validation_steps, device, precision,)
         final_epoch = cumulative_tokens / train_loader.total_tokens
-
         print()
         print(f"training complete")
         print(f"steps:      {completed_steps:,}")
@@ -753,47 +553,14 @@ def main():
         print(f"val ppl:    {math.exp(min(final_val_loss, 20)):.4f}")
 
         with open(log_file, "a") as f:
-            f.write(
-                f"{completed_steps} final "
-                f"epoch={final_epoch:.8f} "
-                f"val_loss={final_val_loss:.8f} "
-                f"ppl={math.exp(min(final_val_loss, 20)):.8f} "
-                f"tokens={cumulative_tokens}\n"
-            )
+            f.write(f"{completed_steps} final " f"epoch={final_epoch:.8f} " f"val_loss={final_val_loss:.8f} " f"ppl={math.exp(min(final_val_loss, 20)):.8f} " f"tokens={cumulative_tokens}\n")
 
-        save_checkpoint(
-            output_dir / "final",
-            model,
-            model_cfg,
-            cfg,
-            config_path,
-            tokenizer,
-            train_loader,
-            muon,
-            adamw,
-            completed_steps,
-            cumulative_tokens,
-        )
+        save_checkpoint(output_dir / "final", model, model_cfg, cfg, config_path, tokenizer, train_loader, muon, adamw, completed_steps, cumulative_tokens,)
 
     except KeyboardInterrupt:
         print("\ntraining interrupted — saving checkpoint")
-
-        save_checkpoint(
-            checkpoint_dir / f"interrupt_{completed_steps:06d}",
-            model,
-            model_cfg,
-            cfg,
-            config_path,
-            tokenizer,
-            train_loader,
-            muon,
-            adamw,
-            completed_steps,
-            cumulative_tokens,
-        )
-
+        save_checkpoint(checkpoint_dir / f"interrupt_{completed_steps:06d}", model, model_cfg, cfg, config_path, tokenizer, train_loader, muon, adamw, completed_steps, cumulative_tokens,)
         raise
-
 
 if __name__ == "__main__":
     main()
