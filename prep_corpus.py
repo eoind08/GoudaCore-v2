@@ -1,4 +1,6 @@
 from datasets import load_dataset
+import os
+import sysconfig
 
 SOURCES = {
     "dclm-edu": dict(repo="HuggingFaceTB/dclm-edu",kind="text",target=3e9,),
