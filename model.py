@@ -46,9 +46,7 @@ def precompute_rope(head_dim, max_seq_len, base=10000.0):
     if head_dim % 2:
         raise ValueError("RoPE head dimension must be even")
 
-    inv_freq = 1.0 / (
-        base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
-    )
+    inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
     positions = torch.arange(max_seq_len, dtype=torch.float32)
     freqs = torch.outer(positions, inv_freq)
 
@@ -65,14 +63,7 @@ def apply_rope(x, cos, sin):
     cos = cos[None, None, :, :]
     sin = sin[None, None, :, :]
 
-    out = torch.stack(
-        (
-            x1 * cos - x2 * sin,
-            x1 * sin + x2 * cos,
-        ),
-        dim=-1,
-    ).flatten(-2)
-
+    out = torch.stack((x1 * cos - x2 * sin, x1 * sin + x2 * cos,), dim=-1,).flatten(-2)
     return out.to(dtype)
 
 
@@ -87,17 +78,8 @@ class Attention(nn.Module):
         kv_dim = self.n_kv_head * self.head_dim
         self.q_dim, self.kv_dim = q_dim, kv_dim
 
-        self.qkv_proj = nn.Linear(
-            config.n_embd,
-            q_dim + 2 * kv_dim,
-            bias=False,
-        )
-
-        self.o_proj = nn.Linear(
-            q_dim,
-            config.n_embd,
-            bias=False,
-        )
+        self.qkv_proj = nn.Linear(config.n_embd, q_dim + 2 * kv_dim, bias=False,)
+        self.o_proj = nn.Linear( q_dim, config.n_embd, bias=False,)
 
         self.q_norm = RMSNorm(self.head_dim, config.rms_eps) if config.qk_norm else nn.Identity()
         self.k_norm = RMSNorm(self.head_dim, config.rms_eps) if config.qk_norm else nn.Identity()
@@ -105,10 +87,7 @@ class Attention(nn.Module):
     def forward(self, x, cos, sin):
         B, T, _ = x.shape
 
-        q, k, v = self.qkv_proj(x).split(
-            (self.q_dim, self.kv_dim, self.kv_dim),
-            dim=-1,
-        )
+        q, k, v = self.qkv_proj(x).split((self.q_dim, self.kv_dim, self.kv_dim), dim=-1,)
 
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.n_kv_head, self.head_dim).transpose(1, 2)
@@ -120,15 +99,7 @@ class Attention(nn.Module):
         q = apply_rope(q, cos, sin)
         k = apply_rope(k, cos, sin)
 
-        y = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            dropout_p=0.0,
-            is_causal=True,
-            enable_gqa=self.n_head != self.n_kv_head,
-        )
-
+        y = F.scaled_dot_product_attention( q, k, v, dropout_p=0.0, is_causal=True, enable_gqa=self.n_head != self.n_kv_head,)
         y = y.transpose(1, 2).contiguous().view(B, T, -1)
         return self.o_proj(y)
 
@@ -137,17 +108,8 @@ class SwiGLU(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.gate_up_proj = nn.Linear(
-            config.n_embd,
-            2 * config.mlp_hidden,
-            bias=False,
-        )
-
-        self.down_proj = nn.Linear(
-            config.mlp_hidden,
-            config.n_embd,
-            bias=False,
-        )
+        self.gate_up_proj = nn.Linear(config.n_embd, 2 * config.mlp_hidden, bias=False,)
+        self.down_proj = nn.Linear(config.mlp_hidden, config.n_embd, bias=False,)
 
     def forward(self, x):
         gate, up = self.gate_up_proj(x).chunk(2, dim=-1)
@@ -158,27 +120,15 @@ class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.attn_norm = RMSNorm(
-            config.n_embd,
-            config.rms_eps,
-        )
+        self.attn_norm = RMSNorm(config.n_embd, config.rms_eps,)
         self.attn = Attention(config)
 
-        self.mlp_norm = RMSNorm(
-            config.n_embd,
-            config.rms_eps,
-        )
+        self.mlp_norm = RMSNorm(config.n_embd, config.rms_eps,)
         self.mlp = SwiGLU(config)
 
     def forward(self, x, cos, sin):
-        x = x + self.attn(
-            self.attn_norm(x),
-            cos,
-            sin,
-        )
-        x = x + self.mlp(
-            self.mlp_norm(x)
-        )
+        x = x + self.attn(self.attn_norm(x), cos, sin,)
+        x = x + self.mlp(self.mlp_norm(x))
         return x
 
 
@@ -187,73 +137,30 @@ class Gouda(nn.Module):
         super().__init__()
 
         self.config = config
+        self.tok_emb = nn.Embedding(config.vocab_size, config.n_embd,)
+        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
+        self.norm = RMSNorm(config.n_embd, config.rms_eps,)
 
-        self.tok_emb = nn.Embedding(
-            config.vocab_size,
-            config.n_embd,
-        )
-
-        self.blocks = nn.ModuleList(
-            [Block(config) for _ in range(config.n_layer)]
-        )
-
-        self.norm = RMSNorm(
-            config.n_embd,
-            config.rms_eps,
-        )
-
-        self.lm_head = nn.Linear(
-            config.n_embd,
-            config.vocab_size,
-            bias=False,
-        )
-
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False,)
         self.lm_head.weight = self.tok_emb.weight
 
-        cos, sin = precompute_rope(
-            config.head_dim,
-            config.max_seq_len,
-            config.rope_base,
-        )
+        cos, sin = precompute_rope(config.head_dim, config.max_seq_len, config.rope_base,)
 
-        self.register_buffer(
-            "rope_cos",
-            cos,
-            persistent=False,
-        )
-        self.register_buffer(
-            "rope_sin",
-            sin,
-            persistent=False,
-        )
+        self.register_buffer("rope_cos", cos, persistent=False,)
+        self.register_buffer("rope_sin", sin, persistent=False,)
 
         self.apply(self._init_weights)
 
         for block in self.blocks:
-            nn.init.normal_(
-                block.attn.o_proj.weight,
-                mean=0.0,
-                std=0.02 / math.sqrt(2 * config.n_layer),
-            )
-            nn.init.normal_(
-                block.mlp.down_proj.weight,
-                mean=0.0,
-                std=0.02 / math.sqrt(2 * config.n_layer),
-            )
+            nn.init.normal_(block.attn.o_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer),)
+            nn.init.normal_(block.mlp.down_proj.weight, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer),)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            nn.init.normal_(
-                module.weight,
-                mean=0.0,
-                std=0.02,
-            )
+            nn.init.normal_(module.weight, mean=0.0, std=0.02,)
+
         elif isinstance(module, nn.Embedding):
-            nn.init.normal_(
-                module.weight,
-                mean=0.0,
-                std=0.02,
-            )
+            nn.init.normal_(module.weight, mean=0.0, std=0.02,)
 
     def forward(self, input_ids, targets=None):
         B, T = input_ids.shape
@@ -281,16 +188,10 @@ class Gouda(nn.Module):
         flat_logits = logits.view(-1, logits.size(-1))
         flat_targets = targets.view(-1)
 
-        loss = F.cross_entropy(
-            flat_logits,
-            flat_targets,
-        )
+        loss = F.cross_entropy(flat_logits, flat_targets,)
 
         if self.config.z_loss:
-            log_z = torch.logsumexp(
-                flat_logits.float(),
-                dim=-1,
-            )
+            log_z = torch.logsumexp(flat_logits.float(), dim=-1,)
             loss = loss + self.config.z_loss * log_z.square().mean()
 
         return logits, loss
@@ -304,13 +205,7 @@ class Gouda(nn.Module):
         return n
 
     @torch.no_grad()
-    def generate(
-        self,
-        input_ids,
-        max_new_tokens,
-        temperature=1.0,
-        top_k=None,
-    ):
+    def generate(self, input_ids, max_new_tokens, temperature=1.0, top_k=None,):
         self.eval()
 
         for _ in range(max_new_tokens):
@@ -319,11 +214,7 @@ class Gouda(nn.Module):
             logits = logits[:, -1, :]
 
             if temperature == 0:
-                next_token = torch.argmax(
-                    logits,
-                    dim=-1,
-                    keepdim=True,
-                )
+                next_token = torch.argmax(logits, dim=-1, keepdim=True,)
             else:
                 logits = logits / temperature
 
@@ -334,14 +225,8 @@ class Gouda(nn.Module):
 
                 probs = F.softmax(logits, dim=-1)
 
-                next_token = torch.multinomial(
-                    probs,
-                    num_samples=1,
-                )
+                next_token = torch.multinomial(probs, num_samples=1,)
 
-            input_ids = torch.cat(
-                (input_ids, next_token),
-                dim=1,
-            )
+            input_ids = torch.cat((input_ids, next_token), dim=1,)
 
         return input_ids
