@@ -45,20 +45,9 @@ def write_datafile(filename, tokens_np):
 def main():
     os.makedirs(LOCAL_DIR, exist_ok=True)
 
-    fragment_scan_options = pyarrow.dataset.ParquetFragmentScanOptions(
-        cache_options = pyarrow.CacheOptions(
-            prefetch_limit = 4
-            range_size_limit = 128 << 20,
-        ),
-    )
+    fragment_scan_options = pyarrow.dataset.ParquetFragmentScanOptions(cache_options = pyarrow.CacheOptions(prefetch_limit = 4 range_size_limit = 128 << 20,),)
 
-    fw = load_dataset(
-        "HuggingFaceFW/fineweb-edu",
-        name=REMOTE_NAME,
-        split="train",
-        streaming=True,
-    )
-
+    fw = load_dataset("HuggingFaceFW/fineweb-edu", name=REMOTE_NAME, split="train", streaming=True,)
     nprocs = max(1, (os.cpu_count() or 2) // 2)
 
     print(f"Dataset: FineWeb-Edu {REMOTE_NAME}")
@@ -80,11 +69,7 @@ def main():
             while offset < len(tokens):
                 if progress_bar is None:
                     split = "val" if shard_index == 0 else "train"
-                    progress_bar = tqdm(
-                        total=SHARD_SIZE,
-                        unit="tokens",
-                        desc=f"Shard {shard_index} ({split})",
-                    )
+                    progress_bar = tqdm(total=SHARD_SIZE, unit="tokens", desc=f"Shard {shard_index} ({split})",)
 
                 remaining = SHARD_SIZE - token_count
                 n = min(remaining, len(tokens) - offset)
@@ -97,25 +82,18 @@ def main():
 
                 if token_count == SHARD_SIZE:
                     split = "val" if shard_index == 0 else "train"
-                    filename = os.path.join(
-                        LOCAL_DIR,
-                        f"edufineweb_{split}_{shard_index:06d}",
-                    )
+                    filename = os.path.join(LOCAL_DIR, f"edufineweb_{split}_{shard_index:06d}",)
 
                     write_datafile(filename, all_tokens_np)
 
                     progress_bar.close()
                     progress_bar = None
-
                     shard_index += 1
                     token_count = 0
 
         if token_count:
             split = "val" if shard_index == 0 else "train"
-            filename = os.path.join(
-                LOCAL_DIR,
-                f"edufineweb_{split}_{shard_index:06d}",
-            )
+            filename = os.path.join(LOCAL_DIR, f"edufineweb_{split}_{shard_index:06d}",)
 
             write_datafile(filename, all_tokens_np[:token_count])
 
