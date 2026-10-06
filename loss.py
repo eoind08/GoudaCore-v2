@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # CONFIG
 # ============================================================
 
-RICOTTA_LOG = 'runs/ricotta-2.0/r1-wsd10(minlr0.1)/ricotta_2_0/train.log'
+RICOTTA_LOG = 'runs/ricotta-2.0/r2/ricotta_2_0/train.log'
 GRUYERE_LOG = 'runs/gruyere-2.0/r1/gruyere_2_0/train.log'
 GOUDA_LOG = 'runs/gouda-2.0/r1/gouda_2_0/train.log'
 
