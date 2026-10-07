@@ -65,4 +65,4 @@ generation:
   top_k: null
 
 save:
-  output_dir: "runs/ricotta-2.0/r4"
+  output_dir: "runs/ricotta-2.0/r2"
