@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 RICOTTA_LOG = 'runs/ricotta-2.0/r1-wsd10(minlr0.1)/ricotta_2_0/train.log'
 GRUYERE_LOG = 'runs/gruyere-2.0/r1/gruyere_2_0/train.log'
 GOUDA_LOG = 'runs/gouda-2.0/r1/gouda_2_0/train.log'
+CHEDDAR_LOG = 'runs/cheddar-2.0/r1/cheddar_2_0/train.log'
 OUTPUT_FILE = "loss_comparison.png"
 
 SMOOTHING_WINDOW = 100
@@ -17,6 +18,7 @@ LOGS = {
     "Ricotta-2.0": RICOTTA_LOG,
     "Gruyère-2.0": GRUYERE_LOG,
     "Gouda-2.0": GOUDA_LOG,
+    "Cheddar-2.0": CHEDDAR_LOG
 }
 
 def parse_log(log_file):
