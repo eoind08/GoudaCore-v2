@@ -1,0 +1,25 @@
+model: hf
+model_args:
+  pretrained: ./runs/cheddar-2.0/r1/cheddar_2_0/final
+  trust_remote_code: true
+  dtype: bfloat16
+
+tasks:
+  - hellaswag
+  - arc_easy
+  - arc_challenge
+  - piqa
+  - winogrande
+  - openbookqa
+  - lambada_openai
+  - boolq
+  - copa
+  - sciq
+  - wsc273
+  - wikitext
+  - truthfulqa_mc2
+
+device: cuda:0
+batch_size: 8
+
+output_path: ./eval/results/cheddar-2.0-e1
