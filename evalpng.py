@@ -62,7 +62,6 @@ for ax, (name, d) in zip(axes.flat, BENCHMARKS.items()):
     refs = [d[k] for k in ('py160', 'py410') if d[k] is not None]
     upper = max([*values, *refs])
     lower = min([*values, *refs])
-    # Use a zero baseline for bar charts to avoid exaggerating differences.
     ax.set_ylim(0, min(1.04, upper * 1.20 + .025))
 
     for xpos, vals in ((x - width / 2, pre), (x + width / 2, inst)):
