@@ -21,7 +21,7 @@ from model import Gouda, ModelConfig
 
 
 class ShardLoader:
-    def __init__(self, data_dir, split, B, T, device, seed=42, shuffle=False):
+    def __init__(self, data_dir, split, B, T, device, seed=42, shuffle=False, allow_wrap=True):
         self.data_dir = Path(data_dir)
         self.split = split
         self.B = B
@@ -29,6 +29,7 @@ class ShardLoader:
         self.device = device
         self.seed = seed
         self.shuffle = shuffle
+        self.allow_wrap = allow_wrap
         self.shards = sorted(self.data_dir.glob(f"*_{split}_*.npy"))
 
         if not self.shards:
@@ -47,7 +48,7 @@ class ShardLoader:
     def reset(self):
         self.rng = random.Random(self.seed)
         self.order = list(range(len(self.shards)))
-
+        self.consumed_inputs = 0
         if self.shuffle:
             self.rng.shuffle(self.order)
         self.order_pos = 0
@@ -63,6 +64,9 @@ class ShardLoader:
         self.position = 0
 
         if self.order_pos == len(self.order):
+            if not self.allow_wrap:
+                raise StopIteration("End of training epoch")
+            
             self.pass_index += 1
             self.order_pos = 0
             self.order = list(range(len(self.shards)))
@@ -71,18 +75,46 @@ class ShardLoader:
 
         self._load_shard()
 
+    def _take(self, count):
+        buf = np.empty(count, dtype=np.int64)
+        filled = 0
+        while filled < count:
+            if self.position == len(self.tokens):
+                self._advance_shard()
+            available = len(self.tokens) - self.position
+            n = min(count - filled, available)
+
+            buf[filled:filled + n] = self.tokens[self.position:self.position + n]
+            self.position += n
+            filled += n
+
+        return buf
+
     def next_batch(self):
         n = self.B * self.T
 
-        while len(self.tokens) - self.position < n + 1:
-            self._advance_shard()
+        if self.allow_wrap:
+            valid = n
+        else:
+            remaining = self.total_tokens - 1 - self.consumed_inputs
+            valid = min(n,remaining)
+            if valid <= 0:
+                raise StopIteration("Epoch Complete")
 
-        buf = np.asarray(self.tokens[self.position:self.position + n + 1], dtype=np.int64,)
-        self.position += n
+        buf = self._take(valid + 1)
+
+        self.position -= 1
+        self.consumed_inputs += valid
+        if valid < n:
+            buf = np.pad(buf, (0, n - valid), constant_values=0,)
+
         x = torch.from_numpy(buf[:-1].copy()).view(self.B, self.T)
         y = torch.from_numpy(buf[1:].copy()).view(self.B, self.T)
 
-        return (x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True),)
+        if valid < n:
+            y.view(-1)[valid:] = -100
+
+        return (x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True), valid,)
 
     @property
     def current_shard(self):
@@ -95,7 +127,7 @@ class ShardLoader:
         return min(self.position / len(self.tokens), 1.0)
 
     def state_dict(self):
-        return {"order": self.order, "order_pos": self.order_pos, "position": self.position, "pass_index": self.pass_index, "rng_state": self.rng.getstate(),}
+        return {"order": self.order, "order_pos": self.order_pos, "position": self.position, "pass_index": self.pass_index, "rng_state": self.rng.getstate(), "consumed_inputs": self.consumed_inputs,}
 
     def load_state_dict(self, state):
         self.order = state["order"]
@@ -103,6 +135,7 @@ class ShardLoader:
         self.position = state["position"]
         self.pass_index = state["pass_index"]
         self.rng.setstate(state["rng_state"])
+        self.consumed_inputs = state["consumed_inputs"]
         self._load_shard()
 
 
@@ -248,7 +281,7 @@ def validate(model, loader, steps, device, precision):
     loss = torch.zeros((), device=device)
 
     for _ in range(steps):
-        x, y = loader.next_batch()
+        x, y, _ = loader.next_batch()
         with autocast_context(device, precision):
             _, batch_loss = model(x, y)
 
@@ -425,8 +458,8 @@ def main():
     torch.set_float32_matmul_precision("high")
 
     data_dir = Path(data_cfg["directory"])
-    train_loader = ShardLoader(data_dir, "train", B, T, device, seed=seed, shuffle=True,)
-    val_loader = ShardLoader(data_dir, "val", B, T, device, seed=seed, shuffle=False,)
+    train_loader = ShardLoader(data_dir, "train", B, T, device, seed=seed, shuffle=True, allow_wrap=True,)
+    val_loader = ShardLoader(data_dir, "val", B, T, device, seed=seed, shuffle=False, allow_wrap=True,)
 
     target_tokens = int(train_loader.total_tokens * epochs)
     max_steps = math.ceil(target_tokens / batch_tokens)
@@ -528,7 +561,7 @@ def main():
             loss_accum = torch.zeros((), device=device)
 
             for _ in range(grad_accum_steps):
-                x, y = train_loader.next_batch()
+                x, y, _ = train_loader.next_batch()
 
                 with autocast_context(device, precision):
                     _, loss = train_model(x, y)
