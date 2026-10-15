@@ -17,7 +17,7 @@ import yaml
 from safetensors.torch import load_model, save_model
 from tokenizers import Tokenizer
 
-from model import Gouda, ModelConfig
+from Analysis.model import Gouda, ModelConfig
 
 
 class ShardLoader:
