@@ -50,7 +50,7 @@ scheduler:
 intervals:
   validate_every: 250
   validation_steps: 20
-  save_every: 1000
+  save_every: 2500
   generate_every: 500
 
 generation:
