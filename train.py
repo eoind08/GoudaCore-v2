@@ -193,7 +193,18 @@ def wsqd_multiplier(step, total_steps, warmup_fraction, decay_fraction, shift_st
     raise NotImplementedError
 
 def linear_multiplier(step, total_steps, warmup_fraction,):
-    raise NotImplementedError
+    if warmup_fraction > 1 or warmup_fraction < 0:
+        raise ValueError("warmup_fraction must be in range [0,1]")
+    
+    warmup_steps = math.floor(warmup_fraction * total_steps)
+    if step < warmup_steps and warmup_steps != 0:
+        multiplier = (step + 1) / warmup_steps
+    else:
+        remaining_steps = total_steps - step
+        decay_steps = total_steps - warmup_steps
+
+        multiplier = remaining_steps / decay_steps
+    return multiplier
 
 def lr_multiplier(step, total_steps, scheduler_type, warmup_fraction, decay_fraction, min_lr_ratio, shift_steps):
     if scheduler_type == "wsd":
