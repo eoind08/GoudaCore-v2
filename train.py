@@ -190,7 +190,23 @@ def wsd_multiplier(step, total_steps, warmup_fraction, decay_fraction, min_lr_ra
     return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
 def wsqd_multiplier(step, total_steps, warmup_fraction, decay_fraction, shift_steps,):
-    raise NotImplementedError
+    if warmup_fraction > 1 or warmup_fraction < 0:
+        raise ValueError("warmup_fraction must be in range [0,1]")
+
+    warmup_steps = math.floor(total_steps * warmup_fraction)
+    cooldown_start = total_steps - math.floor(total_steps * decay_fraction)
+    if step < warmup_steps and warmup_steps != 0:
+        multiplier = (step + 1) / warmup_steps
+    elif step < cooldown_start:
+        multiplier = math.sqrt(shift_steps / (shift_steps + step - warmup_steps))
+    else:
+        mult_c = math.sqrt(shift_steps / (shift_steps + cooldown_start - warmup_steps))
+        remaining_steps = total_steps - step
+        decay_steps = total_steps - cooldown_start
+        multiplier = mult_c * (remaining_steps / decay_steps)
+
+    return multiplier
+
 
 def linear_multiplier(step, total_steps, warmup_fraction,):
     if warmup_fraction > 1 or warmup_fraction < 0:
