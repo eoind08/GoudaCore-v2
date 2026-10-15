@@ -567,11 +567,11 @@ def main():
                     _, loss = train_model(x, y)
                     scaled_loss = loss / grad_accum_steps
 
-                if not torch.isfinite(loss):
-                    raise FloatingPointError(f"non-finite loss at step {step + 1}: {loss.item()}")
-
                 loss_accum += loss.detach() / grad_accum_steps
                 scaled_loss.backward()
+
+            if not torch.isfinite(loss):
+                    raise FloatingPointError(f"non-finite loss at step {step + 1}: {loss.item()}")
 
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip,)
             muon.step()
