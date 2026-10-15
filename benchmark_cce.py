@@ -13,7 +13,7 @@ with open(sys.argv[1]) as f:
 model = Gouda(ModelConfig(**cfg["model"])).cuda()
 model.train()
 
-B = 2
+B = 8
 T = 2048
 V = model.config.vocab_size
 
@@ -21,7 +21,7 @@ x = torch.randint(0, V, (B, T), device="cuda")
 y = torch.randint(0, V, (B, T), device="cuda")
 
 # First test without compilation
-USE_COMPILE = False
+USE_COMPILE = True
 if USE_COMPILE:
     model = torch.compile(model)
 
