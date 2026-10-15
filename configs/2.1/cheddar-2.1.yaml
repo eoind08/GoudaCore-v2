@@ -1,0 +1,72 @@
+name: "Cheddar-2.1"
+
+model:
+  vocab_size: 32768
+  max_seq_len: 4096
+  n_layer: 44
+  n_embd: 768
+  n_head: 12
+  n_kv_head: 4
+  mlp_hidden: 2048
+  rope_base: 10000.0
+  rms_eps: 1.0e-6
+  qk_norm: true
+  z_loss: 0.0
+
+data:
+  directory: "edu_fineweb10B"
+  tokenizer: "alphaedge-ai/Qwen3-1.7B-eng-32768"
+
+train:
+  epochs: 1
+  sequence_length: 2048
+  micro_batch_size: 4
+  batch_tokens: 524288
+  precision: "bfloat16"
+  grad_clip: 1.0
+  compile: true
+  seed: 42
+
+optimizer:
+  muon:
+    lr: 0.008
+    momentum: 0.95
+    weight_decay: 0.1
+    nesterov: true
+    ns_steps: 5
+    adjust_lr_fn: "match_rms_adamw"
+
+  adamw:
+    lr: 0.00015
+    betas: [0.9, 0.95]
+    eps: 1.0e-8
+    weight_decay: 0.1
+
+scheduler:
+  type: wsqd
+  warmup_fraction: 0.01
+  decay_fraction: 0.2
+  min_lr_ratio: 0.01
+  shift_steps: 10000
+
+intervals:
+  validate_every: 250
+  validation_steps: 20
+  save_every: 1500
+  generate_every: 250
+
+generation:
+  prompts:
+    - "The capital of France is"
+    - "The largest planet in the Solar System is"
+    - "In mathematics, the derivative of x squared is"
+    - "Photosynthesis is the process by which"
+    - "Alice left an ice cube on a plate in a warm room. After two hours, the ice cube"
+    - "A book costs £12. If Alice buys three books and pays with £50, the amount of change she receives is"
+    - "Artificial intelligence is"
+  max_new_tokens: 64
+  temperature: 0.0
+  top_k: null
+
+save:
+  output_dir: "runs/cheddar-2.1/r1"

@@ -17,7 +17,7 @@ import yaml
 from safetensors.torch import load_model, save_model
 from tokenizers import Tokenizer
 
-from Analysis.model import Gouda, ModelConfig
+from model import Gouda, ModelConfig
 
 
 class ShardLoader:
@@ -134,11 +134,9 @@ def build_optimizers(model, cfg):
     muon_params = []
     adamw_decay = []
     adamw_no_decay = []
-
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
-
         if p.ndim == 2 and name != "tok_emb.weight":
             muon_params.append(p)
         elif name == "tok_emb.weight":
@@ -162,21 +160,9 @@ def build_optimizers(model, cfg):
     )
 
     adamw = torch.optim.AdamW(
-        [{
-                "params": adamw_decay,
-                "weight_decay": float(adam_cfg.get("weight_decay", 0.1)),
-            },
-            {
-                "params": adamw_no_decay,
-                "weight_decay": 0.0,
-            },],
-            
-        lr=float(adam_cfg["lr"]),
-        betas=tuple(adam_cfg.get("betas", [0.9, 0.95])),
-        eps=float(adam_cfg.get("eps", 1e-8)),
-        fused=torch.cuda.is_available(),
-    )
-
+        [{"params": adamw_decay, "weight_decay": float(adam_cfg.get("weight_decay", 0.1)),},{"params": adamw_no_decay, "weight_decay": 0.0,},],    
+        lr=float(adam_cfg["lr"]),betas=tuple(adam_cfg.get("betas", [0.9, 0.95])), eps=float(adam_cfg.get("eps", 1e-8)), fused=torch.cuda.is_available(),)
+    
     return muon, adamw
 
 
@@ -202,6 +188,23 @@ def wsd_multiplier(step, total_steps, warmup_fraction, decay_fraction, min_lr_ra
     cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
 
     return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
+
+def wsqd_multiplier(step, total_steps, warmup_fraction, decay_fraction, shift_steps,):
+    raise NotImplementedError
+
+def linear_multiplier(step, total_steps, warmup_fraction,):
+    raise NotImplementedError
+
+def lr_multiplier(step, total_steps, scheduler_type, warmup_fraction, decay_fraction, min_lr_ratio, shift_steps):
+    if scheduler_type == "wsd":
+        return wsd_multiplier(step, total_steps, warmup_fraction, decay_fraction, min_lr_ratio)
+    elif scheduler_type == "wsqd":
+        return wsqd_multiplier(step, total_steps, warmup_fraction, decay_fraction, shift_steps)
+    elif scheduler_type == "linear":
+        return linear_multiplier(step, total_steps, warmup_fraction)
+    else:
+        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+
 
 def set_lr(optimizer, lr):
     for group in optimizer.param_groups:
@@ -431,9 +434,18 @@ def main():
     muon_base_lr = float(cfg["optimizer"]["muon"]["lr"])
     adamw_base_lr = float(cfg["optimizer"]["adamw"]["lr"])
 
+    scheduler_type = str(schedule_cfg.get("type", "wsd")).lower()
+
     warmup_fraction = float(schedule_cfg.get("warmup_fraction", 0.01))
     decay_fraction = float(schedule_cfg.get("decay_fraction", 0.10))
     min_lr_ratio = float(schedule_cfg.get("min_lr_ratio", 0.1))
+    shift_steps = int(schedule_cfg.get("shift_steps", 10000))
+
+    if scheduler_type not in ("wsd", "wsqd", "linear"):
+        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+
+    if scheduler_type == "wsqd" and shift_steps <= 0:
+        raise ValueError("WSqD shift_steps must be positive")
 
     param_count = model.num_parameters()
 
@@ -474,7 +486,7 @@ def main():
 
             t0 = time.perf_counter()
 
-            lr_mult = wsd_multiplier(step, max_steps, warmup_fraction, decay_fraction, min_lr_ratio,)
+            lr_mult = lr_multiplier(step, max_steps, scheduler_type, warmup_fraction, decay_fraction, min_lr_ratio, shift_steps,)
             muon_lr = muon_base_lr * lr_mult
             adamw_lr = adamw_base_lr * lr_mult
             set_lr(muon, muon_lr)
