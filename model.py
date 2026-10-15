@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
+from cut_cross_entropy import linear_cross_entropy
 
 
 @dataclass
@@ -180,21 +181,25 @@ class Gouda(nn.Module):
             x = block(x, cos, sin)
 
         x = self.norm(x)
-        logits = self.lm_head(x)
 
         if targets is None:
-            return logits
+            return self.lm_head(x)
 
-        flat_logits = logits.view(-1, logits.size(-1))
-        flat_targets = targets.view(-1)
+        loss = linear_cross_entropy(x, self.lm_head.weight, targets, shift=0, ignore_index=-100, impl="cce",)
+        return None, loss
 
-        loss = F.cross_entropy(flat_logits, flat_targets,)
-
-        if self.config.z_loss:
-            log_z = torch.logsumexp(flat_logits.float(), dim=-1,)
-            loss = loss + self.config.z_loss * log_z.square().mean()
-
-        return logits, loss
+        #
+        #flat_logits = logits.view(-1, logits.size(-1))
+        #flat_targets = targets.view(-1)
+#
+ #       loss = F.cross_entropy(flat_logits, flat_targets,)
+#
+ #       if self.config.z_loss:
+  #          log_z = torch.logsumexp(flat_logits.float(), dim=-1,)
+   #         loss = loss + self.config.z_loss * log_z.square().mean()
+#
+ #       return logits, loss
+        
 
     def num_parameters(self, non_embedding=False):
         n = sum(p.numel() for p in self.parameters())
