@@ -132,15 +132,14 @@ def autocast_context(device, precision):
 
 def build_optimizers(model, cfg):
     muon_params = []
-    adamw_decay = []
     adamw_no_decay = []
+
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
+
         if p.ndim == 2 and name != "tok_emb.weight":
             muon_params.append(p)
-        elif name == "tok_emb.weight":
-            adamw_decay.append(p)
         else:
             adamw_no_decay.append(p)
 
@@ -160,8 +159,13 @@ def build_optimizers(model, cfg):
     )
 
     adamw = torch.optim.AdamW(
-        [{"params": adamw_decay, "weight_decay": float(adam_cfg.get("weight_decay", 0.1)),},{"params": adamw_no_decay, "weight_decay": 0.0,},],    
-        lr=float(adam_cfg["lr"]),betas=tuple(adam_cfg.get("betas", [0.9, 0.95])), eps=float(adam_cfg.get("eps", 1e-8)), fused=torch.cuda.is_available(),)
+        adamw_no_decay,
+        lr=float(adam_cfg["lr"]),
+        betas=tuple(adam_cfg.get("betas", [0.9, 0.95])),
+        eps=float(adam_cfg.get("eps", 1e-8)),
+        weight_decay=0.0,
+        fused=torch.cuda.is_available(),
+    )
     
     return muon, adamw
 
