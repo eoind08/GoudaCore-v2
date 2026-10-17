@@ -37,7 +37,7 @@ optimizer:
     adjust_lr_fn: "match_rms_adamw"
 
   adamw:
-    lr: 0.0010
+    lr: 0.00030
     betas: [0.9, 0.95]
     eps: 1.0e-8
 
@@ -100,4 +100,4 @@ generation:
   top_k: null
 
 save:
-  output_dir: "runs/gouda-2.1/r1"
+  output_dir: "runs/gouda-2.1/r1.5"
