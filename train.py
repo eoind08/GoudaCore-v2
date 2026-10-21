@@ -21,7 +21,7 @@ from model import Gouda, ModelConfig
 
 
 class ShardLoader:
-    def __init__(self, data_dir, split, B, T, device, seed=42, shuffle=False):
+    def __init__(self, data_dir, split, B, T, device, seed=42, shuffle=False, allow_wrap=True):
         self.data_dir = Path(data_dir)
         self.split = split
         self.B = B
@@ -29,6 +29,7 @@ class ShardLoader:
         self.device = device
         self.seed = seed
         self.shuffle = shuffle
+        self.allow_wrap = allow_wrap
         self.shards = sorted(self.data_dir.glob(f"*_{split}_*.npy"))
 
         if not self.shards:
@@ -47,7 +48,7 @@ class ShardLoader:
     def reset(self):
         self.rng = random.Random(self.seed)
         self.order = list(range(len(self.shards)))
-
+        self.consumed_inputs = 0
         if self.shuffle:
             self.rng.shuffle(self.order)
         self.order_pos = 0
@@ -63,6 +64,9 @@ class ShardLoader:
         self.position = 0
 
         if self.order_pos == len(self.order):
+            if not self.allow_wrap:
+                raise StopIteration("End of training epoch")
+            
             self.pass_index += 1
             self.order_pos = 0
             self.order = list(range(len(self.shards)))
@@ -71,18 +75,46 @@ class ShardLoader:
 
         self._load_shard()
 
+    def _take(self, count):
+        buf = np.empty(count, dtype=np.int64)
+        filled = 0
+        while filled < count:
+            if self.position == len(self.tokens):
+                self._advance_shard()
+            available = len(self.tokens) - self.position
+            n = min(count - filled, available)
+
+            buf[filled:filled + n] = self.tokens[self.position:self.position + n]
+            self.position += n
+            filled += n
+
+        return buf
+
     def next_batch(self):
         n = self.B * self.T
 
-        while len(self.tokens) - self.position < n + 1:
-            self._advance_shard()
+        if self.allow_wrap:
+            valid = n
+        else:
+            remaining = self.total_tokens - 1 - self.consumed_inputs
+            valid = min(n,remaining)
+            if valid <= 0:
+                raise StopIteration("Epoch Complete")
 
-        buf = np.asarray(self.tokens[self.position:self.position + n + 1], dtype=np.int64,)
-        self.position += n
+        buf = self._take(valid + 1)
+
+        self.position -= 1
+        self.consumed_inputs += valid
+        if valid < n:
+            buf = np.pad(buf, (0, n - valid), constant_values=0,)
+
         x = torch.from_numpy(buf[:-1].copy()).view(self.B, self.T)
         y = torch.from_numpy(buf[1:].copy()).view(self.B, self.T)
 
-        return (x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True),)
+        if valid < n:
+            y.view(-1)[valid:] = -100
+
+        return (x.to(self.device, non_blocking=True), y.to(self.device, non_blocking=True), valid,)
 
     @property
     def current_shard(self):
@@ -95,7 +127,7 @@ class ShardLoader:
         return min(self.position / len(self.tokens), 1.0)
 
     def state_dict(self):
-        return {"order": self.order, "order_pos": self.order_pos, "position": self.position, "pass_index": self.pass_index, "rng_state": self.rng.getstate(),}
+        return {"order": self.order, "order_pos": self.order_pos, "position": self.position, "pass_index": self.pass_index, "rng_state": self.rng.getstate(), "consumed_inputs": self.consumed_inputs,}
 
     def load_state_dict(self, state):
         self.order = state["order"]
@@ -103,6 +135,7 @@ class ShardLoader:
         self.position = state["position"]
         self.pass_index = state["pass_index"]
         self.rng.setstate(state["rng_state"])
+        self.consumed_inputs = state["consumed_inputs"]
         self._load_shard()
 
 
@@ -132,7 +165,6 @@ def autocast_context(device, precision):
 
 def build_optimizers(model, cfg):
     muon_params = []
-    adamw_decay = []
     adamw_no_decay = []
 
     for name, p in model.named_parameters():
@@ -141,8 +173,6 @@ def build_optimizers(model, cfg):
 
         if p.ndim == 2 and name != "tok_emb.weight":
             muon_params.append(p)
-        elif name == "tok_emb.weight":
-            adamw_decay.append(p)
         else:
             adamw_no_decay.append(p)
 
@@ -162,21 +192,14 @@ def build_optimizers(model, cfg):
     )
 
     adamw = torch.optim.AdamW(
-        [{
-                "params": adamw_decay,
-                "weight_decay": float(adam_cfg.get("weight_decay", 0.1)),
-            },
-            {
-                "params": adamw_no_decay,
-                "weight_decay": 0.0,
-            },],
-            
+        adamw_no_decay,
         lr=float(adam_cfg["lr"]),
         betas=tuple(adam_cfg.get("betas", [0.9, 0.95])),
         eps=float(adam_cfg.get("eps", 1e-8)),
+        weight_decay=0.0,
         fused=torch.cuda.is_available(),
     )
-
+    
     return muon, adamw
 
 
@@ -203,6 +226,50 @@ def wsd_multiplier(step, total_steps, warmup_fraction, decay_fraction, min_lr_ra
 
     return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
+def wsqd_multiplier(step, total_steps, warmup_fraction, decay_fraction, shift_steps,):
+    if warmup_fraction > 1 or warmup_fraction < 0:
+        raise ValueError("warmup_fraction must be in range [0,1]")
+
+    warmup_steps = math.floor(total_steps * warmup_fraction)
+    cooldown_start = total_steps - math.floor(total_steps * decay_fraction)
+    if step < warmup_steps and warmup_steps != 0:
+        multiplier = (step + 1) / warmup_steps
+    elif step < cooldown_start:
+        multiplier = math.sqrt(shift_steps / (shift_steps + step - warmup_steps))
+    else:
+        mult_c = math.sqrt(shift_steps / (shift_steps + cooldown_start - warmup_steps))
+        remaining_steps = total_steps - step
+        decay_steps = total_steps - cooldown_start
+        multiplier = mult_c * (remaining_steps / decay_steps)
+
+    return multiplier
+
+
+def linear_multiplier(step, total_steps, warmup_fraction,):
+    if warmup_fraction > 1 or warmup_fraction < 0:
+        raise ValueError("warmup_fraction must be in range [0,1]")
+    
+    warmup_steps = math.floor(warmup_fraction * total_steps)
+    if step < warmup_steps and warmup_steps != 0:
+        multiplier = (step + 1) / warmup_steps
+    else:
+        remaining_steps = total_steps - step
+        decay_steps = total_steps - warmup_steps
+
+        multiplier = remaining_steps / decay_steps
+    return multiplier
+
+def lr_multiplier(step, total_steps, scheduler_type, warmup_fraction, decay_fraction, min_lr_ratio, shift_steps):
+    if scheduler_type == "wsd":
+        return wsd_multiplier(step, total_steps, warmup_fraction, decay_fraction, min_lr_ratio)
+    elif scheduler_type == "wsqd":
+        return wsqd_multiplier(step, total_steps, warmup_fraction, decay_fraction, shift_steps)
+    elif scheduler_type == "linear":
+        return linear_multiplier(step, total_steps, warmup_fraction)
+    else:
+        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+
+
 def set_lr(optimizer, lr):
     for group in optimizer.param_groups:
         group["lr"] = lr
@@ -214,7 +281,7 @@ def validate(model, loader, steps, device, precision):
     loss = torch.zeros((), device=device)
 
     for _ in range(steps):
-        x, y = loader.next_batch()
+        x, y, _ = loader.next_batch()
         with autocast_context(device, precision):
             _, batch_loss = model(x, y)
 
@@ -391,8 +458,8 @@ def main():
     torch.set_float32_matmul_precision("high")
 
     data_dir = Path(data_cfg["directory"])
-    train_loader = ShardLoader(data_dir, "train", B, T, device, seed=seed, shuffle=True,)
-    val_loader = ShardLoader(data_dir, "val", B, T, device, seed=seed, shuffle=False,)
+    train_loader = ShardLoader(data_dir, "train", B, T, device, seed=seed, shuffle=True, allow_wrap=True,)
+    val_loader = ShardLoader(data_dir, "val", B, T, device, seed=seed, shuffle=False, allow_wrap=True,)
 
     target_tokens = int(train_loader.total_tokens * epochs)
     max_steps = math.ceil(target_tokens / batch_tokens)
@@ -431,9 +498,18 @@ def main():
     muon_base_lr = float(cfg["optimizer"]["muon"]["lr"])
     adamw_base_lr = float(cfg["optimizer"]["adamw"]["lr"])
 
+    scheduler_type = str(schedule_cfg.get("type", "wsd")).lower()
+
     warmup_fraction = float(schedule_cfg.get("warmup_fraction", 0.01))
     decay_fraction = float(schedule_cfg.get("decay_fraction", 0.10))
     min_lr_ratio = float(schedule_cfg.get("min_lr_ratio", 0.1))
+    shift_steps = int(schedule_cfg.get("shift_steps", 10000))
+
+    if scheduler_type not in ("wsd", "wsqd", "linear"):
+        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+
+    if scheduler_type == "wsqd" and shift_steps <= 0:
+        raise ValueError("WSqD shift_steps must be positive")
 
     param_count = model.num_parameters()
 
@@ -474,7 +550,7 @@ def main():
 
             t0 = time.perf_counter()
 
-            lr_mult = wsd_multiplier(step, max_steps, warmup_fraction, decay_fraction, min_lr_ratio,)
+            lr_mult = lr_multiplier(step, max_steps, scheduler_type, warmup_fraction, decay_fraction, min_lr_ratio, shift_steps,)
             muon_lr = muon_base_lr * lr_mult
             adamw_lr = adamw_base_lr * lr_mult
             set_lr(muon, muon_lr)
@@ -485,17 +561,17 @@ def main():
             loss_accum = torch.zeros((), device=device)
 
             for _ in range(grad_accum_steps):
-                x, y = train_loader.next_batch()
+                x, y, _ = train_loader.next_batch()
 
                 with autocast_context(device, precision):
                     _, loss = train_model(x, y)
                     scaled_loss = loss / grad_accum_steps
 
-                if not torch.isfinite(loss):
-                    raise FloatingPointError(f"non-finite loss at step {step + 1}: {loss.item()}")
-
                 loss_accum += loss.detach() / grad_accum_steps
                 scaled_loss.backward()
+
+            if not torch.isfinite(loss):
+                    raise FloatingPointError(f"non-finite loss at step {step + 1}: {loss.item()}")
 
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip,)
             muon.step()
